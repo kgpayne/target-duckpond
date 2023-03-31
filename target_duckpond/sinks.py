@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import uuid
 from pathlib import Path
 from textwrap import dedent
 from typing import Any, Mapping
 
 import sqlalchemy
+from filelock import FileLock, Timeout
 from singer_sdk import PluginBase
 from singer_sdk.connectors import SQLConnector
 from singer_sdk.sinks import SQLSink
@@ -141,9 +144,13 @@ class DuckPondSink(SQLSink):
         return self._connector
 
     @property
+    def raw_dir(self):
+        return Path(f'{self.config["pond_root_dir"]}/raw')
+
+    @property
     def sink_raw_dir(self):
         """This Sink instances final output dir."""
-        path = Path(f'{self.config["pond_root_dir"]}/raw')
+        path = self.raw_dir
         if self.schema_name:
             path = path / self.schema_name
         return path / self.table_name
@@ -170,11 +177,27 @@ class DuckPondSink(SQLSink):
         """
         super().clean_up()
         # lock destination dir
-        # merge upsert working database contents with destination dir in tmp dir
-        # delete destination dir
-        # move tmp dir to destination dir
-        # delete working database
-        # release lock
+        lock_path = self.raw_dir / f"{self.full_table_name}.lock"
+        lock = FileLock(lock_path)
+        try:
+            with lock.acquire(timeout=1800):
+                # merge upsert working database contents with destination dir in tmp dir
+                self.connection.execute(self.generate_copy_statement())
+                # delete files in destination dir
+                shutil.rmtree(self.sink_raw_dir, ignore_errors=True)
+                # move tmp dir to destination dir
+                self.sink_tmp_dir.rename(self.sink_raw_dir)
+                # delete working database
+                os.remove(self.sink_raw_dir / "duckpond.db")
+                wal = self.sink_raw_dir / "duckpond.db.wal"
+                if wal.exists():
+                    os.remove(wal)
+        except Timeout as t:
+            # TODO: tidy up tmp database
+            raise Timeout(
+                "Another instance of this application currently holds the lock."
+            ) from t
+
         return None
 
     # overridden to quote property_names
@@ -198,6 +221,16 @@ class DuckPondSink(SQLSink):
             INSERT INTO {full_table_name}
             ({", ".join([f'"{p}"' for p in property_names])})
             VALUES ({", ".join([f":{name}" for name in property_names])})
+            """,  # noqa: S608
+        )
+        return statement.rstrip()
+
+    def generate_copy_statement(self):
+        base_path = self.sink_tmp_dir
+        parquet_file = base_path / f"{self.table_name}.parquet"
+        statement = dedent(
+            f"""\
+            COPY {self.full_table_name} TO '{parquet_file}' (FORMAT PARQUET)
             """,  # noqa: S608
         )
         return statement.rstrip()
