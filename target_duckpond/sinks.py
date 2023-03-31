@@ -145,14 +145,15 @@ class DuckPondSink(SQLSink):
 
     @property
     def raw_dir(self):
-        return Path(f'{self.config["pond_root_dir"]}/raw')
+        path = Path(f'{self.config["pond_root_dir"]}/raw')
+        if self.schema_name:
+            path = path / self.schema_name
+        return path
 
     @property
     def sink_raw_dir(self):
         """This Sink instances final output dir."""
         path = self.raw_dir
-        if self.schema_name:
-            path = path / self.schema_name
         return path / self.table_name
 
     def setup(self) -> None:
@@ -177,7 +178,7 @@ class DuckPondSink(SQLSink):
         """
         super().clean_up()
         # lock destination dir
-        lock_path = self.raw_dir / f"{self.full_table_name}.lock"
+        lock_path = self.raw_dir / f"{self.table_name}.lock"
         lock = FileLock(lock_path)
         try:
             with lock.acquire(timeout=1800):
