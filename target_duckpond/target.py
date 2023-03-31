@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from singer_sdk.target_base import SQLTarget
 from singer_sdk import typing as th
+from singer_sdk.target_base import SQLTarget
 
-from target_duckpond.sinks import (
-    DuckPondSink,
-)
+from target_duckpond.sinks import DuckPondSink
 
 
 class TargetDuckPond(SQLTarget):
@@ -21,6 +19,7 @@ class TargetDuckPond(SQLTarget):
             th.StringType,
             secret=True,  # Flag config as protected.
             description="SQLAlchemy connection string",
+            default="duckdb:///:memory:",
         ),
     ).to_dict()
 

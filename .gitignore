@@ -1,4 +1,11 @@
 .DS_Store
+.secrets/
+.meltano/
+.vscode/
+
+# duckdb
+*.db
+*.db.wal
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
