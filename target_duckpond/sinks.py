@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
+from pathlib import Path
 from textwrap import dedent
+from typing import Any, Mapping
 
 import sqlalchemy
+from singer_sdk import PluginBase
 from singer_sdk.connectors import SQLConnector
 from singer_sdk.sinks import SQLSink
 from sqlalchemy.sql import Executable
@@ -95,8 +99,85 @@ class DuckPondConnector(SQLConnector):
 class DuckPondSink(SQLSink):
     """DuckPond target sink class."""
 
-    connector_class = DuckPondConnector
+    def __init__(
+        self,
+        target: PluginBase,
+        stream_name: str,
+        schema: dict,
+        key_properties: list[str] | None,
+    ) -> None:
+        """Initialize SQL Sink.
 
+        Args:
+            target: The target object.
+            stream_name: The source tap's stream name.
+            schema: The JSON Schema definition.
+            key_properties: The primary key columns.
+            connector: Optional connector to reuse.
+        """
+        config = dict(target.config)
+        self.sink_id = str(uuid.uuid4())
+        self.sink_tmp_dir = Path(f'{config["pond_root_dir"]}/tmp/{self.sink_id}')
+        self._connector: SQLConnector | None = None
+        super().__init__(
+            target, stream_name, schema, key_properties, connector=self.connector
+        )
+
+    def new_connector(self):
+        """Create a connector for this sink to use."""
+        return DuckPondConnector(
+            {"sqlalchemy_url": f"duckdb:///{str(self.sink_tmp_dir)}/duckpond.db"}
+        )
+
+    @property
+    def connector(self) -> SQLConnector:
+        """The connector object.
+
+        Returns:
+            The connector object.
+        """
+        if not self._connector:
+            self._connector = self.new_connector()
+        return self._connector
+
+    @property
+    def sink_raw_dir(self):
+        """This Sink instances final output dir."""
+        path = Path(f'{self.config["pond_root_dir"]}/raw')
+        if self.schema_name:
+            path = path / self.schema_name
+        return path / self.table_name
+
+    def setup(self) -> None:
+        """Set up Sink.
+
+        This method is called on Sink creation, and creates the required Schema and
+        Table entities in the target database.
+        """
+        # create final output dir
+        self.sink_raw_dir.mkdir(parents=True, exist_ok=True)
+        # create tmp dir for working duckdb database
+        self.sink_tmp_dir.mkdir(parents=True, exist_ok=True)
+        # create/update table in working duckdb database
+        return super().setup()
+
+    def clean_up(self) -> None:
+        """Perform any clean up actions required at end of a stream.
+
+        Implementations should ensure that clean up does not affect resources
+        that may be in use from other instances of the same sink. Stream name alone
+        should not be relied on, it's recommended to use a uuid as well.
+        """
+        super().clean_up()
+        # lock destination dir
+        # merge upsert working database contents with destination dir in tmp dir
+        # delete destination dir
+        # move tmp dir to destination dir
+        # delete working database
+        # release lock
+        return None
+
+    # overridden to quote property_names
     def generate_insert_statement(
         self,
         full_table_name: str,
