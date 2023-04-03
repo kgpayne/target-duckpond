@@ -15,11 +15,16 @@ class TargetDuckPond(SQLTarget):
 
     config_jsonschema = th.PropertiesList(
         th.Property(
-            "sqlalchemy_url",
+            "pond_root_dir",
             th.StringType,
-            secret=True,  # Flag config as protected.
-            description="SQLAlchemy connection string",
-            default="duckdb:///:memory:",
+            description="DuckPond root dir.",
+            default="duckpond",
+        ),
+        th.Property(
+            "default_target_schema",
+            th.StringType,
+            description="DuckPond root dir.",
+            default="main",
         ),
     ).to_dict()
 
